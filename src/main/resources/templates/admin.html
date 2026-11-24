@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="'Estudio · ' + (${emision != null ? emision.nombreEmisora : 'Radio genesy'})">Estudio</title>
+    <link rel="stylesheet" th:href="@{/css/radio.css}">
+</head>
+<body th:attr="data-reproducir-url=@{/api/reproducir}, data-anuncio-url=@{/api/anuncio-hora}, data-auto-url=@{/api/anuncio-hora/automatico}, data-sinc-url=@{/api/sincronizacion}, data-sinc-auto-url=@{/api/sincronizacion/automatico}, data-estado-url=@{/api/reproductor}">
+<div class="container">
+
+    <header class="card hero">
+        <div class="hero__brand">
+            <span class="hero__overline">Sala de control · FM 24/7</span>
+            <h1 class="hero__titulo" th:text="${emision != null ? emision.nombreEmisora : 'Radio genesy'}">Radio genesy</h1>
+            <div class="hero__meta">
+                <span class="hero__frecuencia">FM</span>
+                <span class="muted" th:if="${emision == null}">Sin configuración de emisión</span>
+            </div>
+        </div>
+        <div class="hero__air">
+            <span class="on-air" th:if="${emision != null and emision.enVivo}">
+                <span class="on-air__luz"></span>ON AIR
+            </span>
+            <span class="on-air on-air--off" th:if="${emision != null and !emision.enVivo}">FUERA DEL AIRE</span>
+            <div class="reloj reloj--compacto">
+                <span class="reloj__label">Hora exacta</span>
+                <time class="reloj__hora" id="reloj">--:--:--</time>
+            </div>
+            <div class="visualizador visualizador--compacta" id="viz" aria-hidden="true">
+                <span th:each="n : ${#numbers.sequence(1, 16)}" th:style="${'--i:' + n}"></span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Sintonizador -->
+    <section class="card sintonizador">
+        <div class="panel__cabecera">
+            <span class="panel__numero">01</span>
+            <h2 class="panel__titulo">Sintonizador</h2>
+            <span class="panel__tag">Operación</span>
+        </div>
+
+        <div class="player-box">
+            <div class="pantalla" id="reproduciendo-ahora">
+                <span class="pantalla__label">Seleccioná una pista</span>
+                <strong id="reproduciendo-titulo">En espera de señal</strong>
+            </div>
+
+            <div class="dial" aria-hidden="true">
+                <div class="dial__escala"></div>
+                <span class="dial__aguja" id="aguja"></span>
+                <div class="dial__numeros"><span>88</span><span>FM</span><span>108</span></div>
+            </div>
+
+            <div class="audio-contenedor">
+                <audio id="audio-player" controls preload="none"></audio>
+            </div>
+        </div>
+
+        <p id="estado-audio" class="estado-audio" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- Programación + playlist fusionadas -->
+    <section class="card" id="programacion">
+        <div class="panel__cabecera">
+            <span class="panel__numero">02</span>
+            <h2 class="panel__titulo">Programación y playlists</h2>
+            <span class="panel__tag">Cada programa con sus temas</span>
+        </div>
+
+        <div class="filtros">
+            <a th:href="@{/admin}" th:class="${programaSeleccionadoId == null} ? 'btn active' : 'btn'">
+                <span class="preset__num">00</span> Todos
+            </a>
+            <a th:each="prog, est : ${programas}"
+               th:href="@{/admin(programaId=${prog.id})}"
+               th:class="${programaSeleccionadoId != null and programaSeleccionadoId == prog.id} ? 'btn active' : 'btn'">
+                <span class="preset__num" th:text="${#numbers.formatInteger(est.count, 2)}">01</span>
+                <span th:text="${prog.nombre}">Programa</span>
+            </a>
+        </div>
+
+        <details class="nuevo-programa">
+            <summary>+ Crear nuevo programa</summary>
+            <form th:action="@{/programas}" method="post" class="form-programa">
+                <div class="campo">
+                    <label for="prog-nombre">Nombre</label>
+                    <input id="prog-nombre" type="text" name="nombre" placeholder="Ej.: Tardes latinas" required>
+                </div>
+                <div class="campo">
+                    <label for="prog-descripcion">Descripción</label>
+                    <input id="prog-descripcion" type="text" name="descripcion" placeholder="Bloque de 13 a 00">
+                </div>
+                <div class="campo">
+                    <label for="prog-inicio">Desde</label>
+                    <input id="prog-inicio" type="time" name="horaInicio" value="13:00" required>
+                </div>
+                <div class="campo">
+                    <label for="prog-fin">Hasta</label>
+                    <input id="prog-fin" type="time" name="horaFin" value="00:00" required>
+                </div>
+                <div class="form-acciones">
+                    <button type="submit" class="btn active">Guardar programa</button>
+                </div>
+            </form>
+        </details>
+
+        <p class="muted" th:if="${#lists.isEmpty(programas)}">No hay programas activos. Creá el primero arriba.</p>
+
+        <div class="programas">
+            <details class="programa" th:each="prog : ${programas}"
+                     th:attr="open=${programaSeleccionadoId == null or programaSeleccionadoId == prog.id} ? 'open' : null">
+                <summary class="programa__cabecera">
+                    <span class="programa__hora"
+                          th:text="${(prog.horaInicio != null ? prog.horaInicio : '--:--') + ' - ' + (prog.horaFin != null ? prog.horaFin : '--:--')}">
+                        08:00 - 13:00
+                    </span>
+                    <h3 th:text="${prog.nombre}">Programa</h3>
+                    <span class="programa__descripcion" th:text="${prog.descripcion}">Descripción</span>
+                    <span class="programa__cantidad" th:text="${#lists.size(prog.pistas) + ' temas'}">0 temas</span>
+                </summary>
+
+                <div class="programa__cuerpo">
+                    <p class="muted" th:if="${#lists.isEmpty(prog.pistas)}">
+                        Este programa todavía no tiene temas cargados.
+                    </p>
+
+                    <ol class="playlist" th:if="${not #lists.isEmpty(prog.pistas)}">
+                        <li th:each="pista, pStat : ${prog.pistas}">
+                            <span class="pista__num" th:text="${#numbers.formatInteger(pStat.count, 2)}">01</span>
+
+                            <span class="pista__portada" aria-hidden="true">
+                                <img th:if="${pista.iconoUrl != null and !pista.iconoUrl.isEmpty()}"
+                                     th:src="@{${pista.iconoUrl}}" alt="">
+                                <svg th:if="${pista.iconoUrl == null or pista.iconoUrl.isEmpty()}" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="9"></circle>
+                                    <circle cx="12" cy="12" r="2.2"></circle>
+                                    <path d="M12 3a9 9 0 0 1 9 9"></path>
+                                </svg>
+                            </span>
+
+                            <div class="pista__info">
+                                <strong class="pista__titulo" th:text="${pista.titulo}">Título</strong>
+                                <span class="pista__meta">
+                                    <span th:text="${pista.artista != null ? pista.artista : 'Artista sin definir'}">Artista</span>
+                                    <span> · </span>
+                                    <span th:text="${pista.duracionSegundos != null ? pista.duracionSegundos + ' s' : 'duración libre'}">210 s</span>
+                                </span>
+                                <code class="pista__url" th:text="${pista.urlAudio}">https://...</code>
+                            </div>
+
+                            <div class="acciones">
+                                <button type="button"
+                                        class="btn"
+                                        th:attr="data-id=${pista.id}, data-src=@{${pista.urlAudio}}, data-titulo=${pista.titulo + (pista.artista != null ? ' - ' + pista.artista : '')}"
+                                        onclick="reproducirAudio(this)">
+                                    ▶ Reproducir
+                                </button>
+                                <form th:action="@{/pistas/{id}/eliminar(id=${pista.id})}" method="post"
+                                      class="form-eliminar"
+                                      onsubmit="return confirm('¿Eliminar esta pista?');">
+                                    <input type="hidden" name="programaId" th:value="${prog.id}">
+                                    <button type="submit" class="btn btn-peligro">Eliminar</button>
+                                </form>
+                            </div>
+                        </li>
+                    </ol>
+
+                    <div class="programa__acciones">
+                        <button type="button" class="btn" th:attr="data-programa-id=${prog.id}"
+                                onclick="elegirPrograma(this)">+ Agregar tema a este programa</button>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <!-- Historial -->
+    <section class="card historial">
+        <div class="panel__cabecera">
+            <span class="panel__numero">03</span>
+            <h2 class="panel__titulo">Últimas reproducciones</h2>
+            <span class="panel__tag">Orden cronológico</span>
+        </div>
+
+        <ol class="historial__lista" id="historial-lista">
+            <li th:each="h : ${historial}">
+                <span class="historial__icono" aria-hidden="true">
+                    <img th:if="${h.icono != null and !h.icono.isEmpty()}" th:src="@{${h.icono}}" alt="">
+                    <svg th:if="${h.icono == null or h.icono.isEmpty()}" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <circle cx="12" cy="12" r="2.2"></circle>
+                        <path d="M12 3a9 9 0 0 1 9 9"></path>
+                    </svg>
+                </span>
+                <span class="historial__tema">
+                    <strong th:text="${h.titulo}">Tema</strong>
+                    <small class="muted" th:text="${h.artista != null ? h.artista : 'Artista sin definir'}">Artista</small>
+                </span>
+                <time th:text="${h.hora}">12:34</time>
+            </li>
+        </ol>
+        <p class="muted" th:if="${#lists.isEmpty(historial)}">Todavía no se registraron reproducciones.</p>
+    </section>
+
+    <!-- Estudio / alta de pistas -->
+    <section class="card" id="estudio">
+        <div class="panel__cabecera">
+            <span class="panel__numero">04</span>
+            <h2 class="panel__titulo">Estudio</h2>
+            <span class="panel__tag">Cargar tema</span>
+        </div>
+
+        <form th:action="@{/pistas}" method="post" class="form-pista">
+            <div class="campo">
+                <label for="programaId">Programa</label>
+                <select id="programaId" name="programaId" required>
+                    <option th:each="prog : ${programas}"
+                            th:value="${prog.id}"
+                            th:selected="${programaSeleccionadoId != null and programaSeleccionadoId == prog.id}"
+                            th:text="${prog.nombre}">
+                        Programa
+                    </option>
+                </select>
+            </div>
+
+            <div class="campo">
+                <label for="titulo">Título</label>
+                <input id="titulo" type="text" name="titulo" placeholder="Nombre del tema" required>
+            </div>
+
+            <div class="campo">
+                <label for="artista">Artista</label>
+                <input id="artista" type="text" name="artista" placeholder="Artista o banda">
+            </div>
+
+            <div class="campo">
+                <label for="urlAudio">URL directa del audio</label>
+                <input id="urlAudio" type="text" name="urlAudio"
+                       placeholder="https://ejemplo.com/tema.mp3 o /audio/demo-1.wav" required>
+                <small class="muted">Debe apuntar al archivo (.mp3, .ogg, .wav), no a una página web.</small>
+            </div>
+
+            <div class="campo">
+                <label for="iconoUrl">URL de la portada / ícono</label>
+                <input id="iconoUrl" type="text" name="iconoUrl"
+                       placeholder="https://ejemplo.com/portada.jpg o /img/tema.jpg">
+                <small class="muted">Se mostrará en el historial del oyente. Si se deja vacía, se usa el ícono de disco.</small>
+            </div>
+
+            <div class="campo">
+                <label for="duracionSegundos">Duración (seg)</label>
+                <input id="duracionSegundos" type="number" name="duracionSegundos" min="1" placeholder="167">
+            </div>
+
+            <div class="form-acciones">
+                <button type="submit" class="btn active">Guardar tema</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- Sincronización desde carpeta local -->
+    <section class="card" id="sincronizacion">
+        <div class="panel__cabecera">
+            <span class="panel__numero">05</span>
+            <h2 class="panel__titulo">Sincronizar carpeta local</h2>
+            <span class="panel__tag">Tu PC → la radio</span>
+        </div>
+
+        <p class="muted">
+            Escaneamos una carpeta de esta computadora y damos de alta los audios nuevos.
+            Usá <code>Artista - Título.mp3</code> para separar artista y título; si hay una imagen
+            con el mismo nombre (jpg, png, webp o svg), se usa como portada.
+        </p>
+
+        <form th:action="@{/sincronizar}" method="post" class="form-pista">
+            <div class="campo">
+                <label for="sync-carpeta">Carpeta de música</label>
+                <input id="sync-carpeta" type="text" name="carpeta" th:value="${carpetaMusica}"
+                       placeholder="C:/proyectos/radio/musica">
+                <small class="muted">La carpeta configurada es <code th:text="${carpetaMusica}">...</code>. Los audios se publican en <code>/radio/musica/</code>.</small>
+            </div>
+
+            <div class="campo">
+                <label for="sync-programa">Programa destino</label>
+                <select id="sync-programa" name="programaId" required>
+                    <option th:each="prog : ${programas}"
+                            th:value="${prog.id}"
+                            th:selected="${programaSeleccionadoId != null and programaSeleccionadoId == prog.id}"
+                            th:text="${prog.nombre}">
+                        Programa
+                    </option>
+                </select>
+            </div>
+
+            <div class="campo campo--check">
+                <label class="check">
+                    <input type="checkbox" name="recursivo" value="true"> Incluir subcarpetas
+                </label>
+                <label class="check">
+                    <input type="checkbox" id="sync-auto"> Sincronización automática cada 5 min
+                </label>
+            </div>
+
+            <div class="form-acciones">
+                <button type="submit" class="btn active">Sincronizar ahora</button>
+            </div>
+        </form>
+
+        <div class="sync-resultado" th:if="${sincronizacion != null}">
+            <h3>Última sincronización</h3>
+            <p class="muted"
+               th:text="${'Carpeta: ' + sincronizacion.carpeta() + ' · Programa: ' + sincronizacion.programa()}">
+                Carpeta: ... · Programa: ...
+            </p>
+
+            <div class="sync-numeros">
+                <span><strong th:text="${sincronizacion.encontrados()}">0</strong> encontrados</span>
+                <span><strong th:text="${sincronizacion.importados()}">0</strong> importados</span>
+                <span><strong th:text="${sincronizacion.omitidos()}">0</strong> ya existían</span>
+            </div>
+
+            <ul class="sync-temas" th:if="${not #lists.isEmpty(sincronizacion.temas())}">
+                <li th:each="tema : ${sincronizacion.temas()}" th:text="${tema}">Tema</li>
+            </ul>
+
+            <ul class="sync-errores" th:if="${not #lists.isEmpty(sincronizacion.errores())}">
+                <li th:each="error : ${sincronizacion.errores()}" th:text="${error}">Error</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- Reloj / hora exacta -->
+    <section class="card reloj-card">
+        <div class="panel__cabecera">
+            <span class="panel__numero">06</span>
+            <h2 class="panel__titulo">Hora exacta</h2>
+            <span class="panel__tag">Aviso al aire</span>
+        </div>
+
+        <div class="reloj">
+            <span class="reloj__label">Hora local de la emisión</span>
+            <time class="reloj__hora reloj__hora--grande" id="reloj-grande">--:--:--</time>
+            <span class="reloj__fecha" id="reloj-fecha">—</span>
+            <div class="reloj__proximo">
+                <span>Próximo aviso de hora en</span>
+                <strong id="reloj-countdown">--:--</strong>
+            </div>
+
+            <div class="reloj__controles">
+                <button type="button" class="btn active" id="btn-anunciar">▶ Anunciar hora</button>
+                <label class="check">
+                    <input type="checkbox" id="auto-anuncio">
+                    Anuncio automático cada hora
+                </label>
+            </div>
+            <p id="estado-anuncio" class="estado-audio" role="status" aria-live="polite"></p>
+        </div>
+    </section>
+
+    <footer class="pie">
+        <span>Radio genesy · Vista del administrador</span>
+        <a class="enlace-admin" th:href="@{/}">Vista del oyente →</a>
+    </footer>
+
+</div>
+<script th:src="@{/js/reproductor.js?v=4}"></script>
+<script>
+    (function () {
+        const player = document.getElementById("audio-player");
+        const estado = document.getElementById("estado-audio");
+        const tituloDestino = document.getElementById("reproduciendo-titulo");
+        const visualizador = document.getElementById("viz");
+        const aguja = document.getElementById("aguja");
+        const frecuencia = document.querySelector(".hero__frecuencia");
+        const endpointReproducir = document.body.getAttribute("data-reproducir-url");
+        const endpointEstado = document.body.getAttribute("data-estado-url");
+        const endpointAnuncio = document.body.getAttribute("data-anuncio-url");
+        const endpointAuto = document.body.getAttribute("data-auto-url");
+        const btnAnunciar = document.getElementById("btn-anunciar");
+        const autoAnuncio = document.getElementById("auto-anuncio");
+        const estadoAnuncio = document.getElementById("estado-anuncio");
+        const endpointSinc = document.body.getAttribute("data-sinc-url");
+        const endpointSincAuto = document.body.getAttribute("data-sinc-auto-url");
+        const sincAuto = document.getElementById("sync-auto");
+
+        function sintonizar(titulo) {
+            if (!aguja || !frecuencia) return;
+            let hash = 0;
+            for (let i = 0; i < titulo.length; i++) {
+                hash = (hash * 31 + titulo.charCodeAt(i)) % 1000;
+            }
+            aguja.style.left = (8 + hash % 84) + "%";
+            frecuencia.textContent = "FM " + (88 + (hash % 200) / 10).toFixed(1);
+        }
+
+        function marcar(btn) {
+            document.querySelectorAll(".playlist li.activo").forEach(function (li) {
+                li.classList.remove("activo");
+            });
+            const item = btn ? btn.closest("li") : null;
+            if (item) item.classList.add("activo");
+        }
+
+        function animar(activo) {
+            if (visualizador) visualizador.classList.toggle("sonando", activo);
+        }
+
+        function urlDeRecurso(url) {
+            if (/^(https?:|data:|blob:)/i.test(url)) return url;
+            const contexto = endpointReproducir.replace(/\/api\/reproducir\/?$/, "");
+            return contexto + (url.charAt(0) === "/" ? url : "/" + url);
+        }
+
+        function mostrar(pista) {
+            if (!pista) {
+                tituloDestino.textContent = "En espera de señal";
+                return;
+            }
+            tituloDestino.textContent = pista.titulo + (pista.artista ? " - " + pista.artista : "");
+            sintonizar(tituloDestino.textContent);
+        }
+
+        const sync = ReproductorSync.crear({
+            audio: player,
+            endpoint: endpointEstado,
+            rol: "estudio",
+            urlDeRecurso: urlDeRecurso,
+            mostrar: mostrar,
+            setBoton: animar,
+            onPista: function (pista) {
+                const boton = document.querySelector('.playlist button[data-id="' + pista.id + '"]');
+                if (boton) marcar(boton);
+                estado.textContent = "Sintonizando " + pista.titulo + "...";
+                estado.className = "estado-audio";
+            },
+            onError: function (mensaje) {
+                if (!mensaje) return;
+                estado.textContent = mensaje;
+                estado.className = "estado-audio error";
+            }
+        });
+
+        window.elegirPrograma = function (btn) {
+            const id = btn.getAttribute("data-programa-id");
+            const select = document.getElementById("programaId");
+            if (select && id) select.value = id;
+            const destino = document.getElementById("estudio");
+            if (destino) destino.scrollIntoView({ behavior: "smooth", block: "start" });
+        };
+
+        window.reproducirAudio = function (btn) {
+            const id = btn.getAttribute("data-id");
+            const titulo = btn.getAttribute("data-titulo") || "Audio";
+            if (!id) return;
+
+            marcar(btn);
+            sintonizar(titulo);
+            estado.textContent = "Sintonizando " + titulo + "...";
+            estado.className = "estado-audio";
+
+            sync.reproducir(id).catch(function (error) {
+                estado.textContent = error.message;
+                estado.className = "estado-audio error";
+            });
+        };
+
+        if (player && estado) {
+            player.addEventListener("playing", function () {
+                if (!sync.esAplicando()) {
+                    estado.textContent = "Reproduciendo en vivo";
+                    estado.className = "estado-audio ok";
+                    animar(true);
+                }
+            });
+            player.addEventListener("waiting", function () {
+                if (!sync.esAplicando()) {
+                    estado.textContent = "Sintonizando...";
+                    estado.className = "estado-audio";
+                }
+            });
+            player.addEventListener("pause", function () {
+                if (sync.esAplicando() || player.ended || player.currentTime <= 0) return;
+                animar(false);
+                estado.textContent = "En pausa";
+                estado.className = "estado-audio";
+                sync.pausar().catch(function () {});
+            });
+            player.addEventListener("seeked", function () {
+                if (!sync.esAplicando() && Number.isFinite(player.currentTime)) {
+                    sync.fijarPosicion(player.currentTime).catch(function () {});
+                }
+            });
+            player.addEventListener("ended", function () {
+                if (sync.esAplicando() || !sync.esAudible()) return;
+                animar(false);
+                estado.textContent = "Pasando al siguiente tema...";
+                estado.className = "estado-audio";
+                sync.siguiente().catch(function () {});
+            });
+            player.addEventListener("error", function () {
+                if (sync.esAplicando()) return;
+                const codigo = player.error ? player.error.code : "?";
+                animar(false);
+                estado.textContent = "Error de audio (código " + codigo + "): la URL no corresponde a un audio reproducible.";
+                estado.className = "estado-audio error";
+            });
+        }
+
+        sync.iniciar();
+
+        const relojes = [
+            document.getElementById("reloj"),
+            document.getElementById("reloj-grande")
+        ];
+        const fechaDestino = document.getElementById("reloj-fecha");
+        const cuentaDestino = document.getElementById("reloj-countdown");
+
+        function dos(cifra) {
+            return String(cifra).padStart(2, "0");
+        }
+
+        function actualizarReloj() {
+            const ahora = new Date();
+            const texto = dos(ahora.getHours()) + ":" + dos(ahora.getMinutes()) + ":" + dos(ahora.getSeconds());
+            relojes.forEach(function (destino) {
+                if (destino) destino.textContent = texto;
+            });
+            if (fechaDestino) {
+                fechaDestino.textContent = ahora.toLocaleDateString("es-AR", {
+                    weekday: "long", day: "2-digit", month: "long", year: "numeric"
+                });
+            }
+            if (cuentaDestino) {
+                const restante = 3599 - (ahora.getMinutes() * 60 + ahora.getSeconds());
+                cuentaDestino.textContent = dos(Math.floor(restante / 60)) + ":" + dos(restante % 60);
+            }
+        }
+        actualizarReloj();
+        setInterval(actualizarReloj, 1000);
+
+        function hablar(texto) {
+            if (!("speechSynthesis" in window)) return false;
+            window.speechSynthesis.cancel();
+            const locucion = new SpeechSynthesisUtterance(texto);
+            locucion.lang = "es-AR";
+            locucion.rate = 0.95;
+            const voz = window.speechSynthesis.getVoices()
+                .find(function (v) { return v.lang.toLowerCase().startsWith("es"); });
+            if (voz) locucion.voice = voz;
+            window.speechSynthesis.speak(locucion);
+            return true;
+        }
+
+        if (btnAnunciar) {
+            btnAnunciar.addEventListener("click", async function () {
+                try {
+                    const respuesta = await fetch(endpointAnuncio, { method: "POST" });
+                    const anuncio = await respuesta.json();
+                    estadoAnuncio.textContent = "Anuncio enviado a los oyentes: " + anuncio.texto;
+                    estadoAnuncio.className = "estado-audio ok";
+                    if (!hablar(anuncio.texto)) {
+                        estadoAnuncio.textContent += " (este navegador no puede hablar)";
+                    }
+                } catch (error) {
+                    estadoAnuncio.textContent = "No se pudo enviar el anuncio.";
+                    estadoAnuncio.className = "estado-audio error";
+                }
+            });
+        }
+
+        if (autoAnuncio) {
+            fetch(endpointAnuncio)
+                .then(function (r) { return r.json(); })
+                .then(function (a) { autoAnuncio.checked = !!a.automatico; })
+                .catch(function () {});
+
+            autoAnuncio.addEventListener("change", async function () {
+                try {
+                    await fetch(endpointAuto + "?activo=" + autoAnuncio.checked, { method: "POST" });
+                } catch (error) {
+                    autoAnuncio.checked = !autoAnuncio.checked;
+                }
+            });
+        }
+
+        if (sincAuto) {
+            fetch(endpointSinc)
+                .then(function (r) { return r.json(); })
+                .then(function (estado) { sincAuto.checked = !!estado.automatica; })
+                .catch(function () {});
+
+            sincAuto.addEventListener("change", async function () {
+                try {
+                    await fetch(endpointSincAuto + "?activo=" + sincAuto.checked, { method: "POST" });
+                } catch (error) {
+                    sincAuto.checked = !sincAuto.checked;
+                }
+            });
+        }
+    })();
+</script>
+</body>
+</html>

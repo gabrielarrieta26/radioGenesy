@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${emision != null ? emision.nombreEmisora : 'Radio genesy'}">Radio genesy</title>
+    <link rel="stylesheet" th:href="@{/css/radio.css}">
+</head>
+<body th:attr="data-cola-url=@{/api/cola}, data-reproducir-url=@{/api/reproducir}, data-anuncio-url=@{/api/anuncio-hora}, data-estado-url=@{/api/reproductor}">
+<div class="container oyente">
+
+    <header class="cabecera-oyente">
+        <div>
+            <span class="hero__overline">Radio en línea · FM 24/7</span>
+            <h1 class="hero__titulo" th:text="${emision != null ? emision.nombreEmisora : 'Radio genesy'}">Radio genesy</h1>
+        </div>
+        <div class="cabecera__derecha">
+            <span class="on-air" th:if="${emision != null and emision.enVivo}">
+                <span class="on-air__luz"></span>ON AIR
+            </span>
+            <div class="reloj reloj--compacto">
+                <span class="reloj__label">Hora exacta</span>
+                <time class="reloj__hora" id="reloj">--:--:--</time>
+            </div>
+        </div>
+    </header>
+
+    <section class="card reproductor-oyente">
+        <div class="panel__cabecera">
+            <span class="panel__numero">▶</span>
+            <h2 class="panel__titulo">En directo</h2>
+            <span class="panel__tag">Playlist continua</span>
+        </div>
+
+        <div class="play-center">
+            <button type="button" id="btn-play" class="play-btn" aria-label="Reproducir">
+                <svg class="icono icono-play" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+                <svg class="icono icono-pausa" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M6 5h4v14H6zM14 5h4v14h-4z"/>
+                </svg>
+            </button>
+
+            <div class="play-info">
+                <span class="pantalla__label">Sonando ahora</span>
+                <strong id="oyente-titulo">Presioná play</strong>
+                <span class="muted" id="oyente-artista">La radio empieza acá</span>
+                <div class="progreso" aria-hidden="true">
+                    <div class="progreso__barra" id="progreso-barra"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="visualizador" id="oyente-viz" aria-hidden="true">
+            <span th:each="n : ${#numbers.sequence(1, 28)}" th:style="${'--i:' + n}"></span>
+        </div>
+
+        <p id="oyente-estado" class="estado-audio" role="status" aria-live="polite"></p>
+        <audio id="radio-audio" preload="none"></audio>
+    </section>
+
+    <section class="card historial">
+        <div class="panel__cabecera">
+            <span class="panel__numero">≡</span>
+            <h2 class="panel__titulo">Historial</h2>
+        </div>
+
+        <ol class="historial__lista" id="historial-lista">
+            <li th:each="h : ${historial}">
+                <span class="historial__icono" aria-hidden="true">
+                    <img th:if="${h.icono != null and !h.icono.isEmpty()}"
+                         th:src="@{${h.icono}}" alt="">
+                    <svg th:if="${h.icono == null or h.icono.isEmpty()}" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <circle cx="12" cy="12" r="2.2"></circle>
+                        <path d="M12 3a9 9 0 0 1 9 9"></path>
+                    </svg>
+                </span>
+                <span class="historial__tema">
+                    <strong th:text="${h.titulo}">Tema</strong>
+                    <small class="muted" th:text="${h.artista != null ? h.artista : 'Artista sin definir'}">Artista</small>
+                </span>
+                <time th:text="${h.hora}">12:34</time>
+            </li>
+        </ol>
+        <p class="muted" th:if="${#lists.isEmpty(historial)}" id="historial-vacio">
+            Todavía no se reprodujo ningún tema.
+        </p>
+
+        <template id="plantilla-historial">
+            <li>
+                <span class="historial__icono" aria-hidden="true">
+                    <img hidden alt="">
+                    <svg viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="9"></circle>
+                        <circle cx="12" cy="12" r="2.2"></circle>
+                        <path d="M12 3a9 9 0 0 1 9 9"></path>
+                    </svg>
+                </span>
+                <span class="historial__tema">
+                    <strong></strong>
+                    <small class="muted"></small>
+                </span>
+                <time></time>
+            </li>
+        </template>
+    </section>
+
+    <footer class="pie">
+        <span>Radio genesy · Vista del oyente</span>
+        <a class="enlace-admin" th:href="@{/admin}">Estudio →</a>
+    </footer>
+
+</div>
+<script th:src="@{/js/reproductor.js?v=4}"></script>
+<script>
+    (function () {
+        const body = document.body;
+        const endpointCola = body.getAttribute("data-cola-url");
+        const endpointReproducir = body.getAttribute("data-reproducir-url");
+        const endpointAnuncio = body.getAttribute("data-anuncio-url");
+        const audio = document.getElementById("radio-audio");
+        const btn = document.getElementById("btn-play");
+        const titulo = document.getElementById("oyente-titulo");
+        const artista = document.getElementById("oyente-artista");
+        const estado = document.getElementById("oyente-estado");
+        const barra = document.getElementById("progreso-barra");
+        const visualizador = document.getElementById("oyente-viz");
+        const lista = document.getElementById("historial-lista");
+        const plantilla = document.getElementById("plantilla-historial");
+        const reloj = document.getElementById("reloj");
+
+        const contexto = endpointCola.replace(/\/api\/cola\/?$/, "");
+        const endpointEstado = body.getAttribute("data-estado-url");
+        let cola = [];
+        let historialInicial = true;
+
+        function urlDeRecurso(url) {
+            if (/^(https?:|data:|blob:)/i.test(url)) return url;
+            return contexto + (url.charAt(0) === "/" ? url : "/" + url);
+        }
+
+        function setBoton(activo) {
+            btn.classList.toggle("sonando", activo);
+            btn.setAttribute("aria-label", activo ? "Pausar" : "Reproducir");
+            if (visualizador) visualizador.classList.toggle("sonando", activo);
+        }
+
+        function mostrar(pista) {
+            titulo.textContent = pista ? pista.titulo : "Presioná play";
+            artista.textContent = pista ? (pista.artista || "Artista sin definir") : "La radio empieza acá";
+            if (!pista) barra.style.width = "0%";
+        }
+
+        async function cargarCola() {
+            const respuesta = await fetch(endpointCola);
+            if (!respuesta.ok) throw new Error("No se pudo cargar la playlist");
+            cola = await respuesta.json();
+        }
+
+        function agregarHistorial(pista) {
+            const vacio = document.getElementById("historial-vacio");
+            if (vacio) vacio.remove();
+
+            const item = plantilla.content.firstElementChild.cloneNode(true);
+            const icono = item.querySelector(".historial__icono");
+            if (pista.icono) {
+                const imagen = icono.querySelector("img");
+                imagen.src = urlDeRecurso(pista.icono);
+                imagen.hidden = false;
+                icono.querySelector("svg").hidden = true;
+            }
+            item.querySelector(".historial__tema strong").textContent = pista.titulo;
+            item.querySelector(".historial__tema small").textContent = pista.artista || "Artista sin definir";
+            item.querySelector("time").textContent =
+                new Date().toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+
+            lista.appendChild(item);
+            while (lista.children.length > 5) {
+                lista.removeChild(lista.firstElementChild);
+            }
+        }
+
+        const sync = ReproductorSync.crear({
+            audio: audio,
+            endpoint: endpointEstado,
+            rol: "oyente",
+            urlDeRecurso: urlDeRecurso,
+            mostrar: mostrar,
+            setBoton: setBoton,
+            onPista: function (pista) {
+                if (historialInicial) return;
+                agregarHistorial(pista);
+            },
+            onError: function (mensaje) {
+                if (!mensaje) return;
+                estado.textContent = mensaje;
+                estado.className = "estado-audio error";
+            }
+        });
+
+        btn.addEventListener("click", async function () {
+            if (sync.estaEsperandoGesto()) {
+                sync.activarSonido();
+                return;
+            }
+            try {
+                if (!cola.length) await cargarCola();
+                await sync.alternar(cola.length ? cola[0].id : null);
+                estado.textContent = sync.esReproduciendo() ? "Señal en vivo" : "En pausa";
+                estado.className = "estado-audio ok";
+            } catch (error) {
+                estado.textContent = error.message;
+                estado.className = "estado-audio error";
+            }
+        });
+
+        audio.addEventListener("playing", function () {
+            if (!sync.esAplicando()) {
+                estado.textContent = "Señal en vivo";
+                estado.className = "estado-audio ok";
+            }
+        });
+
+        audio.addEventListener("pause", function () {
+            if (!sync.esAplicando()) setBoton(false);
+        });
+
+        audio.addEventListener("timeupdate", function () {
+            if (audio.duration) {
+                barra.style.width = (audio.currentTime / audio.duration * 100) + "%";
+            }
+        });
+
+        audio.addEventListener("ended", function () {
+            if (!sync.esAplicando() && sync.esAudible()) sync.siguiente().catch(function () {});
+        });
+
+        audio.addEventListener("error", function () {
+            if (sync.esAplicando() || !sync.esAudible()) return;
+            estado.textContent = "No se pudo cargar el tema, pasando al siguiente...";
+            estado.className = "estado-audio error";
+            sync.siguiente().catch(function () {});
+        });
+
+        sync.iniciar();
+        setTimeout(function () { historialInicial = false; }, 1200);
+
+        function actualizarReloj() {
+            if (reloj) {
+                reloj.textContent = new Date().toLocaleTimeString("es-AR", {
+                    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+                });
+            }
+        }
+        actualizarReloj();
+        setInterval(actualizarReloj, 1000);
+
+        let ultimoAnuncioId = 0;
+        let anuncioInicializado = false;
+        const momentoCarga = Math.floor(Date.now() / 1000);
+
+        function hablar(texto) {
+            if (!("speechSynthesis" in window)) return false;
+            window.speechSynthesis.cancel();
+            const locucion = new SpeechSynthesisUtterance(texto);
+            locucion.lang = "es-AR";
+            locucion.rate = 0.95;
+            const voz = window.speechSynthesis.getVoices()
+                .find(function (v) { return v.lang.toLowerCase().startsWith("es"); });
+            if (voz) locucion.voice = voz;
+
+            function terminar() {
+                if (visualizador) visualizador.classList.remove("anunciando");
+            }
+            locucion.onend = terminar;
+            locucion.onerror = terminar;
+
+            window.speechSynthesis.speak(locucion);
+            return true;
+        }
+
+        async function revisarAnuncio() {
+            try {
+                const respuesta = await fetch(endpointAnuncio);
+                if (!respuesta.ok) return;
+                const anuncio = await respuesta.json();
+                if (!anuncio || !anuncio.id) return;
+
+                if (!anuncioInicializado) {
+                    anuncioInicializado = true;
+                    ultimoAnuncioId = anuncio.id;
+                    if (anuncio.fechaEpoch >= momentoCarga && hablar(anuncio.texto)) {
+                        if (visualizador) visualizador.classList.add("anunciando");
+                    }
+                    return;
+                }
+                if (anuncio.id === ultimoAnuncioId) return;
+                ultimoAnuncioId = anuncio.id;
+
+                const antiguedad = Math.floor(Date.now() / 1000) - anuncio.fechaEpoch;
+                if (antiguedad < 300 && hablar(anuncio.texto)) {
+                    if (visualizador) visualizador.classList.add("anunciando");
+                }
+            } catch (error) {
+                // Sin conexión con el estudio: se reintenta en el próximo sondeo.
+            }
+        }
+        revisarAnuncio();
+        setInterval(revisarAnuncio, 3000);
+    })();
+</script>
+</body>
+</html>
